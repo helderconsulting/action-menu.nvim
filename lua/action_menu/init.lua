@@ -8,10 +8,15 @@ local state = {
 	origin = nil,
 }
 
+state.reset = function()
+	state.target = nil
+	state.origin = nil
+end
+
 ---@param command action_menu.Command
 ---@return string
 local function to_line(command)
-	return string.format(" %s %s ", command.key, command.label)
+	return string.format(" %s %s ", command.label, command.key)
 end
 
 --- types
@@ -58,8 +63,8 @@ M.setup = function(config)
 	vim.api.nvim_buf_set_lines(buffer, 0, -1, false, menu_items)
 	for i, cmd in ipairs(config.commands) do
 		local line_idx = i - 1
-		local key_text = " " .. cmd.key .. " "
-		local label_text = cmd.label .. " "
+		local key_text = " " .. cmd.label .. " "
+		local label_text = cmd.key .. " "
 
 		vim.api.nvim_buf_set_extmark(buffer, namespace, line_idx, 0, {
 			end_col = #key_text,
@@ -85,6 +90,7 @@ M.setup = function(config)
 					vim.api.nvim_set_current_win(state.origin)
 				end
 				command.action()
+				state.reset()
 			end)
 		end, { buffer = buffer })
 	end
@@ -93,6 +99,7 @@ M.setup = function(config)
 		if state.target then
 			vim.api.nvim_win_close(state.target, true)
 		end
+		state.reset()
 	end, { buffer = buffer })
 
 	vim.keymap.set(config.keymaps.select_item.mode, config.keymaps.select_item.lhs, function()
@@ -107,6 +114,7 @@ M.setup = function(config)
 					command.action()
 				end
 			end
+			state.reset()
 		end)
 	end, { buffer = buffer })
 
@@ -126,7 +134,7 @@ M.setup = function(config)
 	vim.keymap.set(config.keymaps.open_menu.mode, config.keymaps.open_menu.lhs, function()
 		state.origin = vim.api.nvim_get_current_win()
 		state.target = vim.api.nvim_open_win(buffer, true, options)
-	end)
+	end, { buffer = buffer })
 end
 
 return M
