@@ -134,7 +134,7 @@ M.setup = function(config)
 	vim.keymap.set(config.keymaps.open_menu.mode, config.keymaps.open_menu.lhs, function()
 		state.origin = vim.api.nvim_get_current_win()
 		state.target = vim.api.nvim_open_win(buffer, true, options)
-	end, { buffer = buffer })
+	end)
 end
 
 return M
