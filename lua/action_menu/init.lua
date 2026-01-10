@@ -6,17 +6,48 @@ local M = {}
 local state = {
 	target = nil,
 	origin = nil,
+	buffer = nil,
+	namespace = vim.api.nvim_create_namespace("action_menu"),
+	width = 30,
+	commands = {},
 }
+
+local map_commands_to_keybind = function()
+	for _, command in ipairs(state.commands) do
+		vim.keymap.set("n", command.key, function()
+			vim.api.nvim_win_close(state.target, true)
+			vim.schedule(function()
+				if vim.api.nvim_win_is_valid(state.origin) then
+					vim.api.nvim_set_current_win(state.origin)
+				end
+				command.action()
+				state.reset()
+			end)
+		end, { buffer = state.buffer })
+	end
+end
+
+local unmap_commands_from_keybind = function()
+	for _, command in ipairs(state.commands) do
+		vim.keymap.del("n", command.key, { buffer = state.buffer })
+	end
+end
 
 state.reset = function()
 	state.target = nil
 	state.origin = nil
+	state.buffer = nil
 end
 
 ---@param command action_menu.Command
+---@param width integer
 ---@return string
-local function to_line(command)
-	return string.format(" %s %s ", command.label, command.key)
+local function to_line(command, width)
+	local key = string.format(" %s ", command.key)
+	local label = string.format(" %s", command.label)
+	local padding = width - string.len(label) - string.len(key)
+	local spacing = string.rep(" ", padding)
+	return label .. spacing .. key
 end
 
 --- types
@@ -26,24 +57,90 @@ end
 ---@class action_menu.Colors
 ---@field key action_menu.Color
 ---@field label action_menu.Color
----@class action_menu.Keymap
----@field mode string | table<string>
----@field lhs string
----@class action_menu.Keymaps
----@field open_menu action_menu.Keymap
----@field close_menu action_menu.Keymap
----@field select_item action_menu.Keymap
 ---@class action_menu.Command
 ---@field key string
 ---@field label string
 ---@field action function
 ---@class action_menu.Config
 ---@field commands action_menu.Command[]
----@field keymaps action_menu.Keymaps
 ---@field colors action_menu.Colors
+
+M.select = function()
+	local line = vim.api.nvim_get_current_line()
+	vim.api.nvim_win_close(state.target, true)
+	vim.schedule(function()
+		if vim.api.nvim_win_is_valid(state.origin) then
+			vim.api.nvim_set_current_win(state.origin)
+		end
+		for _, command in ipairs(state.commands) do
+			if line == to_line(command, state.width) then
+				command.action()
+			end
+		end
+
+		unmap_commands_from_keybind()
+		state.reset()
+	end)
+end
+
+M.open = function()
+	local menu_items = {}
+	for _, command in ipairs(state.commands) do
+		table.insert(menu_items, to_line(command, state.width))
+	end
+	state.buffer = vim.api.nvim_create_buf(false, true)
+	vim.api.nvim_buf_set_lines(state.buffer, 0, -1, false, menu_items)
+
+	for i, cmd in ipairs(state.commands) do
+		local line_idx = i - 1
+		local key = string.format(" %s ", cmd.key)
+		local label = string.format(" %s", cmd.label)
+
+		local padding = state.width - string.len(label) - string.len(key)
+		local spacing = string.rep(" ", padding)
+
+		vim.api.nvim_buf_set_extmark(state.buffer, state.namespace, line_idx, #spacing + #label, {
+			end_col = #spacing + #label + #key,
+			hl_group = "CommandLabel",
+		})
+
+		vim.api.nvim_buf_set_extmark(state.buffer, state.namespace, line_idx, 0, {
+			end_col = #spacing + #label,
+			hl_group = "CommandKey",
+		})
+	end
+
+	vim.api.nvim_set_option_value("modifiable", false, { buf = state.buffer })
+	vim.api.nvim_set_option_value("buftype", "nofile", { buf = state.buffer })
+	vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = state.buffer })
+	vim.api.nvim_set_option_value("swapfile", false, { buf = state.buffer })
+	local height = #state.commands
+	local options = {
+		relative = "cursor",
+		row = 1,
+		col = 0,
+		width = state.width,
+		height = height,
+		style = "minimal",
+		border = "none",
+		focusable = false,
+	}
+	map_commands_to_keybind()
+	state.origin = vim.api.nvim_get_current_win()
+	state.target = vim.api.nvim_open_win(state.buffer, true, options)
+end
+
+M.close = function()
+	if state.target then
+		unmap_commands_from_keybind()
+		vim.api.nvim_win_close(state.target, true)
+	end
+	state.reset()
+end
 
 ---@param config action_menu.Config
 M.setup = function(config)
+	state.commands = config.commands
 	vim.api.nvim_set_hl(0, "CommandKey", {
 		fg = config.colors.key.fg,
 		bg = config.colors.key.bg,
@@ -54,87 +151,6 @@ M.setup = function(config)
 		fg = config.colors.label.fg,
 		bg = config.colors.label.bg,
 	})
-	local namespace = vim.api.nvim_create_namespace("action_menu")
-	local buffer = vim.api.nvim_create_buf(false, true)
-	local menu_items = {}
-	for _, command in ipairs(config.commands) do
-		table.insert(menu_items, to_line(command))
-	end
-	vim.api.nvim_buf_set_lines(buffer, 0, -1, false, menu_items)
-	for i, cmd in ipairs(config.commands) do
-		local line_idx = i - 1
-		local key_text = " " .. cmd.label .. " "
-		local label_text = cmd.key .. " "
-
-		vim.api.nvim_buf_set_extmark(buffer, namespace, line_idx, 0, {
-			end_col = #key_text,
-			hl_group = "CommandKey",
-		})
-
-		vim.api.nvim_buf_set_extmark(buffer, namespace, line_idx, #key_text, {
-			end_col = #key_text + #label_text,
-			hl_group = "CommandLabel",
-		})
-	end
-
-	vim.api.nvim_set_option_value("modifiable", false, { buf = buffer })
-	vim.api.nvim_set_option_value("buftype", "nofile", { buf = buffer })
-	vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buffer })
-	vim.api.nvim_set_option_value("swapfile", false, { buf = buffer })
-
-	for _, command in ipairs(config.commands) do
-		vim.keymap.set("n", command.key, function()
-			vim.api.nvim_win_close(state.target, true)
-			vim.schedule(function()
-				if vim.api.nvim_win_is_valid(state.origin) then
-					vim.api.nvim_set_current_win(state.origin)
-				end
-				command.action()
-				state.reset()
-			end)
-		end, { buffer = buffer })
-	end
-
-	vim.keymap.set(config.keymaps.close_menu.mode, config.keymaps.close_menu.lhs, function()
-		if state.target then
-			vim.api.nvim_win_close(state.target, true)
-		end
-		state.reset()
-	end, { buffer = buffer })
-
-	vim.keymap.set(config.keymaps.select_item.mode, config.keymaps.select_item.lhs, function()
-		local line = vim.api.nvim_get_current_line()
-		vim.api.nvim_win_close(state.target, true)
-		vim.schedule(function()
-			if vim.api.nvim_win_is_valid(state.origin) then
-				vim.api.nvim_set_current_win(state.origin)
-			end
-			for _, command in ipairs(config.commands) do
-				if line == to_line(command) then
-					command.action()
-				end
-			end
-			state.reset()
-		end)
-	end, { buffer = buffer })
-
-	local width = 30
-	local height = #config.commands
-	local options = {
-		relative = "cursor",
-		row = 1,
-		col = 0,
-		width = width,
-		height = height,
-		style = "minimal",
-		border = "none",
-		focusable = false,
-	}
-
-	vim.keymap.set(config.keymaps.open_menu.mode, config.keymaps.open_menu.lhs, function()
-		state.origin = vim.api.nvim_get_current_win()
-		state.target = vim.api.nvim_open_win(buffer, true, options)
-	end)
 end
 
 return M
