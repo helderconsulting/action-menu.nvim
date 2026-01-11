@@ -84,6 +84,9 @@ M.select = function()
 end
 
 M.open = function()
+	if state.buffer then
+		return
+	end
 	local menu_items = {}
 	for _, command in ipairs(state.commands) do
 		table.insert(menu_items, to_line(command, state.width))
@@ -117,7 +120,7 @@ M.open = function()
 	local height = #state.commands
 	local options = {
 		relative = "cursor",
-		row = 1,
+		row = 0,
 		col = 0,
 		width = state.width,
 		height = height,
